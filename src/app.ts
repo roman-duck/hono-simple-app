@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Context, Next } from 'hono'
+import { jwt, sign } from 'hono/jwt'
 import { appendTrailingSlash } from 'hono/trailing-slash';
 import posts from './routes/posts.js'
 import authors from './routes/authors.js'
@@ -13,6 +14,9 @@ type AppVariables = {
 }
 
 const app = new Hono<{ Variables: AppVariables }>()
+const SECRET = 'my-secret-key' // TODO: Use an environment variable 
+
+const cacheStore = new Map();
 
 // Middleware to "authenticate" a user from a header
 const authMiddleware = async (c: Context, next: Next) => {
@@ -56,5 +60,65 @@ app.get('/admin/dashboard', authMiddleware, (c) => {
     userId: user.id,
   })
 })
+
+// Custom caching middleware for Node.js
+app.use('/api/public-data', async (c, next) => {
+  const cacheKey = c.req.url;
+
+  // Check if the response is in our cache
+  if (cacheStore.has(cacheKey)) {
+    const cachedItem = cacheStore.get(cacheKey);
+    console.log('Serving from custom in-memory cache.');
+    return new Response(cachedItem.body, { headers: cachedItem.headers });
+  }
+
+  // If not in cache, proceed to the route handler
+  await next();
+
+  // After the handler returns, clone and store the response
+  if (c.res) {
+    const newResponse = c.res.clone();
+    const body = await newResponse.text();
+    const headers = Object.fromEntries(newResponse.headers.entries());
+    cacheStore.set(cacheKey, { body, headers });
+    console.log('Storing response in custom in-memory cache.');
+  }
+});
+
+// Login to get a JWT
+app.post('/login', async (c) => {
+  const { username } = await c.req.json()
+  if (username === 'admin') {
+    const payload = {
+      sub: username,
+      role: 'admin',
+      exp: Math.floor(Date.now() / 1000) + 60 * 5, // 5 minutes expiration
+    }
+    const token = await sign(payload, SECRET)
+    return c.json({ token })
+  }
+  return c.json({ error: 'Invalid credentials' }, 401)
+})
+
+// Protected route
+app.get(
+  '/api/protected',
+  jwt({ secret: SECRET }),
+  (c) => {
+    const payload = c.get('jwtPayload')
+    return c.json({ message: 'You have access!', payload })
+  }
+)
+
+// Cached route
+app.get(
+  '/api/public-data',
+  async (c) => {
+    console.log('Executing handler with delay...');
+    await new Promise(resolve => setTimeout(resolve, 1000)) // Simulate a delay
+    return c.json({ data: 'This is some public data that rarely changes.' })
+  }
+)
+
 
 export default app

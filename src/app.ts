@@ -120,5 +120,21 @@ app.get(
   }
 )
 
+app.get('/users/:id', (c) => {
+  const id = c.req.param('id')
+  if (isNaN(Number(id))) {
+    throw new Error('User ID must be a number.')
+  }
+  return c.text(`User ID is ${id}`)
+})
+
+app.onError((err, c) => {
+  console.error(`${err}`)
+  return c.json({
+    success: false,
+    message: err.message,
+  }, 500)
+})
+
 
 export default app

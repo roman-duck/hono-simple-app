@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import type { Context, Next } from 'hono'
 import { jwt, sign } from 'hono/jwt'
+import { z } from 'zod'
+import { zValidator } from '@hono/zod-validator'
 import { appendTrailingSlash } from 'hono/trailing-slash';
 import posts from './routes/posts.js'
 import authors from './routes/authors.js'
@@ -17,6 +19,13 @@ const app = new Hono<{ Variables: AppVariables }>()
 const SECRET = 'my-secret-key' // TODO: Use an environment variable 
 
 const cacheStore = new Map();
+
+const createUserSchema = z.object({
+  username: z.string().min(3).max(20),
+  email: z.string().email(),
+  age: z.number().int().positive(),
+  tags: z.array(z.string()).optional(),
+})
 
 // Middleware to "authenticate" a user from a header
 const authMiddleware = async (c: Context, next: Next) => {
@@ -136,5 +145,19 @@ app.onError((err, c) => {
   }, 500)
 })
 
+app.post(
+  '/users',
+  zValidator('json', createUserSchema), // Use zValidator middleware
+  (c) => {
+    // The validated data is available on c.req.valid()
+    const user = c.req.valid('json')
+    console.log(`Creating user: ${user.username} with email ${user.email}`)
+    return c.json({
+      success: true,
+      message: 'User created successfully!',
+      user: user,
+    }, 201)
+  }
+)
 
 export default app
